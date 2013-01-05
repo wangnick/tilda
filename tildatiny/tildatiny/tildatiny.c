@@ -3,27 +3,23 @@
 #include <avr/interrupt.h>
 #include <util/crc16.h>
 
-#define F_CPU 8000000
-#include <util/delay.h>
-
 #include "usiTwiSlave.h"
 
-#define I2C_SLAVE_ADDR  0x26            // i2c slave address (38)
 
 /*
-  H-Brücke 754410
+  H-Bridge SN754410
 */
-const int P12EN = PB3; // Right motor PWM logic
-const int P34EN = PB5; // Left motor PWM logic
-const int P2A = PB4; // Right motor backwards logic - 1A right motor forwards logic is negated from this in hardware
-const int P4A = PB6; // Left motor backwards logic - 3A left motor forwards logic is negated from this in hardware
+const int P12EN = PB3; // Right motor PWM output
+const int P34EN = PB5; // Left motor PWM output
+const int P2A = PB4; // Right motor backwards output - 1A right motor forwards output is negated from this in hardware
+const int P4A = PB6; // Left motor backwards output - 3A left motor forwards output is negated from this in hardware
 
 // Following terminals are connected via 33kOhm / 10kOhm to GND voltage splitters
 const int MUX1Y = 3; // Right motor forwards positive Back-EMF (ADC3, PA4) 
 const int MUX2Y = 4; // Right motor backwards positive Back-EMF (ADC4, PA5)
 const int MUX3Y = 5; // Left motor forwards positive Back-EMF (ADC5, PA6) 
 const int MUX4Y = 6; // Left motor backwards positive Back-EMF (ADC6, PA7)
-const int MUXVCC = 1; // Battery voltage terminal (ADC1, PA1)
+const int MUXVCC = 1; // Battery positive voltage terminal (ADC1, PA1)
 
 const int PLED = PA3;
 
@@ -36,13 +32,14 @@ enum {AWAIT, SETTLE, MEASURE, MEASUREPOS, MEASURENEG} adcstate;
 const unsigned long ADCTIME[] = {6000, 250, 5, 5, 5};
 unsigned long adctime, lastadc;
 	
+const int I2C_SLAVE_ADDR  0x26            // Our i2c slave address (38)
+const unsigned long I2CTIME [] = {50000, 2000};
 unsigned long lasti2c;
 int i2c = false;
 unsigned char i2cdata[3];
 int i2ccount = 0;
 int led = 0;
 
-const unsigned long I2CTIME [] = {50000, 2000};
 const unsigned long LEDTIME [] = {500000, 100000};
 unsigned long ledtime[2], lastled;
 
@@ -317,25 +314,6 @@ void loop() {
 		modbit(PORTA,PLED,led);
 		lastled = time;
 	}
-	
-	//modbit(PORTA,PLED,0);
-	//_delay_us(1);
-	//modbit(PORTA,PLED,1);
-	//_delay_us(1);
-	//modbit(PORTA,PLED,0);
-	//_delay_us(1);
-	//for (int i=0; i<32; i++) {
-		//modbit(PORTA,PLED,!!(time&0x80000000));
-		//_delay_us(1);
-		//time <<= 1;
-	//}
-	//modbit(PORTA,PLED,0);
-	//_delay_us(1);
-	//modbit(PORTA,PLED,1);
-	//_delay_us(1);
-	//modbit(PORTA,PLED,0);
-	//_delay_us(1);
-//
 }
 
 int main(void) {
