@@ -1,10 +1,22 @@
+// tildatiny.c
+// (C) 2013 Sebastian Wangnick
+//
+// Attiny861 I2C-controlled PWM generator for two brushed DC motors, in my case Lego 71427.
+// Returns current motor speeds (measured via Back-EMF) and battery power to the I2C master.
+// Motors are driven via H-Bridge, in my case SN754410.
+//
+// Part of the Tilda project, a self-balancing two-wheel Lego robot, with Raspberry Pi as I2C master.
+// Refer to http://code.google.com/p/tilda for further details.
+// 
+// TODO: Restart motors after sample-and-hold whilst last conversion is is progress.
+// TODO: Try to sample in PWM pause?
+
 #include <stdlib.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/crc16.h>
 
 #include "usiTwiSlave.h"
-
 
 /*
   H-Bridge SN754410
@@ -14,38 +26,36 @@ const int P34EN = PB5; // Left motor PWM output
 const int P2A = PB4; // Right motor backwards output - 1A right motor forwards output is negated from this in hardware
 const int P4A = PB6; // Left motor backwards output - 3A left motor forwards output is negated from this in hardware
 
-// Following terminals are connected via 33kOhm / 10kOhm to GND voltage splitters
-const int MUX1Y = 3; // Right motor forwards positive Back-EMF (ADC3, PA4) 
-const int MUX2Y = 4; // Right motor backwards positive Back-EMF (ADC4, PA5)
-const int MUX3Y = 5; // Left motor forwards positive Back-EMF (ADC5, PA6) 
-const int MUX4Y = 6; // Left motor backwards positive Back-EMF (ADC6, PA7)
-const int MUXVCC = 1; // Battery positive voltage terminal (ADC1, PA1)
 
-const int PLED = PA3;
+const int PLED = PA3; // LED plus piezo speaker in series
 
 const unsigned char PWMMAXDUTY = 0x7F;
 unsigned char dutyright, dutyleft, dirright, dirleft;
 
 enum {V12, V34, VCC, VSIZE} adckind;
 int adcval[VSIZE];
-enum {AWAIT, SETTLE, MEASURE, MEASUREPOS, MEASURENEG} adcstate;
-const unsigned long ADCTIME[] = {6000, 250, 5, 5, 5};
+// Following terminals are connected via 33kOhm / 10kOhm to GND voltage splitters
+//     Right motor forwards positive Back-EMF: ADC3 (PA4)
+//     Right motor backwards positive Back-EMF: ADC4 (PA5)
+//     Left motor forwards positive Back-EMF: ADC5 (PA6)
+//     Left motor backwards positive Back-EMF: ADC6 (PA7)
+//     Battery positive voltage terminal: ADC1 (PA1)
+const unsigned long ADCMUX[] = {3, 5, 1};
+const unsigned long ADCMUXNEG[] = {4, 6};
+enum {START, AWAIT, SETTLE, MEASURE, MEASUREPOS, MEASURENEG} adcstate;
+const unsigned long ADCTIME[] = {0, 6000, 250, 5, 5, 5};
 unsigned long adctime, lastadc;
 	
-const int I2C_SLAVE_ADDR  0x26            // Our i2c slave address (38)
+const int I2C_SLAVE_ADDR = 0x26;           // Our i2c slave address (38)
 const unsigned long I2CTIME [] = {50000, 2000};
 unsigned long lasti2c;
 int i2c = false;
 unsigned char i2cdata[3];
 int i2ccount = 0;
-int led = 0;
+int led;
 
 const unsigned long LEDTIME [] = {500000, 100000};
 unsigned long ledtime[2], lastled;
-
-
-// TODO: Restart motors after sample-and-hold whilst last conversion is is progress.
-// TODO: Try to sample in PWM pause?
 
 #define modbit(val,bitnum,bitval) val = val & ~(1<<bitnum) | ((bitval)<<bitnum)
 
@@ -55,7 +65,7 @@ ISR (TIMER0_OVF_vect) {
 	timer0++;
 }
 
-//#define TIMER16BIT
+#define TIMER16BIT
 
 unsigned long micros () {
 	unsigned long result;
@@ -65,10 +75,10 @@ unsigned long micros () {
 #ifdef TIMER16BIT	
 	result |= (unsigned int)TCNT0H<<8; // Without the cast the uint8_t is promoted to signed int,
 										// which will get negative after the shift if TCNT0H>=0x80. Phew.
-	if ((TIFR & (1<<TOV0)) && result<0xFFFF) result += 0x10000;
+	if ((TIFR & (1<<TOV0)) && result<0x8000) result += 0x10000;
 	result += timer0<<16;
 #else
-	if ((TIFR & (1<<TOV0)) && result<0xFF) result += 0x100;
+	if ((TIFR & (1<<TOV0)) && result<0x80) result += 0x100;
 	result += timer0<<8;
 #endif
 	SREG |= sreg_i;
@@ -99,12 +109,12 @@ void drive (signed char speedright, signed char speedleft) {
 
 void setup_motors () {
 	DDRB |= 1<<P12EN | 1<<P34EN | 1<<P2A | 1<<P4A;
-	PORTB |= 1<<P12EN | 1<<P34EN;
-	for (unsigned long now = micros(); micros()-now<3000; ) {
-		led = !led;
-		modbit(PORTA,PLED,led);
-	}	
-	PORTB &= ~(1<<P12EN | 1<<P34EN);
+	//PORTB |= 1<<P12EN | 1<<P34EN;
+	//for (unsigned long now = micros(); micros()-now<3000; ) {
+		//led = !led;
+		//modbit(PORTA,PLED,led);
+	//}	
+	//PORTB &= ~(1<<P12EN | 1<<P34EN);
 	
 	// The Phase and Frequency Correct PWM Mode (PWM1A/PWM1B = 1 and WGM11:10 = 01) provides
 	// a high resolution Phase and Frequency Correct PWM waveform generation option. The
@@ -150,9 +160,12 @@ void setup_motors () {
 void adc () {
 	static int posval;
 	switch (adcstate) {
+	case START:
+		adckind = VCC;
+		ADMUX = ADCMUX[adckind];
+		// Fall through
 	case AWAIT:
 		if (adckind==VCC) {
-			ADMUX = MUXVCC;
 			ADCSRA |= (1<<ADSC);
 			adcstate = MEASURE;
 		} else {
@@ -165,7 +178,6 @@ void adc () {
 		}
 		break;		
 	case SETTLE:
-		ADMUX = adckind==V12?MUX1Y:MUX3Y;
 		ADCSRA |= (1<<ADSC);
 		adcstate = MEASUREPOS;
 		break;
@@ -181,7 +193,7 @@ void adc () {
 		if (!(ADCSRA & (1<<ADSC))) {
 			posval = ADCL;
 			posval |= ADCH<<8;
-			ADMUX = adckind==V12?MUX2Y:MUX4Y;
+			ADMUX = ADCMUXNEG[adckind];
 			ADCSRA |= (1<<ADSC);
 			adcstate = MEASURENEG;
 		}
@@ -202,6 +214,7 @@ void adc () {
 	}
 	if (adcstate==AWAIT) {
 		adckind = (adckind+1)%VSIZE;
+		ADMUX = ADCMUX[adckind];
 	}
 	adctime = ADCTIME[adcstate];
 }
@@ -217,22 +230,26 @@ void setup_adc() {
 	// set ADC to left-adjusted
 	// ADCSRB |= (1<<BIN) | (1<<ADLAR);
 	lastadc = micros();
+	adcstate = START;
 	adctime = 0;
-	adckind = VCC;
-	adcstate = AWAIT;
 }
 
 void setup_led() {
+	led = 1;
 	DDRA |= 1<<PLED;
 	modbit(PORTA,PLED,led);
+	modbit(PORTA,PLED,!led);
+	modbit(PORTA,PLED,led);
 	ledtime[0] = LEDTIME[0];
-	ledtime[1] = LEDTIME[1];	
+	ledtime[1] = LEDTIME[1];
 	lastled = micros();
 }
 
 void setup_i2c() {
 	USIPP |= 1<<USIPOS; // Switch USI to alternate pins PA0 & PA2
 	usiTwiSlaveInit(I2C_SLAVE_ADDR);
+	i2c = false;
+	i2ccount = 0;
 }
 
 void setup() {
