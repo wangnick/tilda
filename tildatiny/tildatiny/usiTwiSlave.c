@@ -105,7 +105,7 @@ Change Activity:
 
 #if defined( __AVR_ATtiny261__ ) | \
      defined( __AVR_ATtiny461__ ) | \
-     defined( __AVR_ATtiny861__ORIG )
+     defined( __AVR_ATtiny861__ )
 #  define DDR_USI             DDRB
 #  define PORT_USI            PORTB
 #  define PIN_USI             PINB
@@ -118,7 +118,7 @@ Change Activity:
 #  define USI_OVERFLOW_VECTOR USI_OVF_vect
 #endif
 
-#if defined( __AVR_ATtiny861__ )
+#if defined( __AVR_ATtiny861__ALT__ )
 #  define DDR_USI             DDRA
 #  define PORT_USI            PORTA
 #  define PIN_USI             PINA
@@ -360,15 +360,18 @@ usiTwiSlaveInit(
   // for USIWM1, USIWM0 = 11).  This inserts a wait state.  SCL is released
   // by the ISRs (USI_START_vect and USI_OVERFLOW_vect).
 
+  // Set SCL and SDA as input
+  DDR_USI &= ~ (( 1 << PORT_USI_SCL ) | ( 1 << PORT_USI_SDA ));
+
+  // set SCL and SDA high to enable pullup
+  PORT_USI |= ( 1 << PORT_USI_SCL ) | ( 1 << PORT_USI_SDA );
+
   // Set SCL and SDA as output
   DDR_USI |= ( 1 << PORT_USI_SCL ) | ( 1 << PORT_USI_SDA );
 
-  // set SCL high
-  PORT_USI |= ( 1 << PORT_USI_SCL );
-
-  // set SDA high
-  PORT_USI |= ( 1 << PORT_USI_SDA );
-
+  // set SCL and SDA high
+  PORT_USI |= ( 1 << PORT_USI_SCL ) | ( 1 << PORT_USI_SDA );
+  
   // Set SDA as input
   DDR_USI &= ~( 1 << PORT_USI_SDA );
 

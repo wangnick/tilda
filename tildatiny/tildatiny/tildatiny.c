@@ -26,8 +26,10 @@ const int P34EN = PB5; // Left motor PWM output
 const int P2A = PB4; // Right motor backwards output - 1A right motor forwards output is negated from this in hardware
 const int P4A = PB6; // Left motor backwards output - 3A left motor forwards output is negated from this in hardware
 
-
-const int PLED = PA3; // LED plus piezo speaker in series
+const int PIR = PCINT3; // Infrared receiver, PA3
+const int PDISTTRIG = PA2; // IR distance measurement HC-SR04, trigger, PA2
+const int PDISTECHO = PA3; // IR distance measurement HC-SR04, echo, PA3
+const int PLED = PA0; // LED
 
 const unsigned char PWMMAXDUTY = 0x7F;
 unsigned char dutyright, dutyleft, dirright, dirleft;
@@ -86,11 +88,12 @@ unsigned long micros () {
 }
 
 void setup_micros () {
+	TCCR0A = 0;
 #ifdef TIMER16BIT
 	// Set Timer 0 to 16 bit
-	TCCR0A = 1<<TCW0;
+	TCCR0A |= 1<<TCW0;
 #endif
-	// Enable Timer 0 interrupt
+	// Enable Timer 0 overflow interrupt
 	TIMSK = 1<<TOIE0;
 	// Activate Timer 0 clock, prescaler 1/8 -> 1us,1MHz
 	TCCR0B = 1<<CS01;
@@ -157,31 +160,48 @@ void setup_motors () {
 	//TCCR1B = (1<<CS13) | (1<<CS10);
 }
 
-void adc () {
+void setup_adc() {
+	// set ADC prescale factor to 32
+	// 8 MHz / 32 = 4 us/250kHz, not inside the desired 50-200 KHz range but sufficient.
+	// One measurement takes 13 cycles = 52us. The Back-EMF settles after 250us (MOTORSETTLETIME).
+	// We need two measurement, one for each motor terminal. Thus, the motor is non-powered for 350us.
+	// We measure every 18ms, this makes a 2% loss of maximum torque.
+	ADCSRA = (1<<ADEN) | (1<<ADPS1) | (1<<ADPS0);
+	// set ADC to bipolar mode for differential conversions
+	// set ADC to left-adjusted
+	// ADCSRB |= (1<<BIN) | (1<<ADLAR);
+	lastadc = micros();
+	adcstate = START;
+	adctime = 0;
+}
+
+void do_adc (unsigned long time) {
+	if (time-lastadc<adctime) return;
+	lastadc = time;
 	static int posval;
 	switch (adcstate) {
-	case START:
+		case START:
 		adckind = VCC;
 		ADMUX = ADCMUX[adckind];
 		// Fall through
-	case AWAIT:
+		case AWAIT:
 		if (adckind==VCC) {
 			ADCSRA |= (1<<ADSC);
 			adcstate = MEASURE;
 		} else {
 			if (adckind==V12) {
 				TCCR1A &= ~(1<<COM1B1);
-			} else {			
+			} else {
 				TCCR1C &= ~(1<<COM1D1);
-			}			
+			}
 			adcstate = SETTLE;
 		}
-		break;		
-	case SETTLE:
+		break;
+		case SETTLE:
 		ADCSRA |= (1<<ADSC);
 		adcstate = MEASUREPOS;
 		break;
-	case MEASURE:
+		case MEASURE:
 		if (!(ADCSRA & (1<<ADSC))) {
 			posval = ADCL;
 			posval |= ADCH<<8;
@@ -189,7 +209,7 @@ void adc () {
 			adcstate = AWAIT;
 		}
 		break;
-	case MEASUREPOS:
+		case MEASUREPOS:
 		if (!(ADCSRA & (1<<ADSC))) {
 			posval = ADCL;
 			posval |= ADCH<<8;
@@ -198,7 +218,7 @@ void adc () {
 			adcstate = MEASURENEG;
 		}
 		break;
-	case MEASURENEG:
+		case MEASURENEG:
 		if (!(ADCSRA & (1<<ADSC))) {
 			int val = ADCL;
 			val |= ADCH<<8;
@@ -219,53 +239,146 @@ void adc () {
 	adctime = ADCTIME[adcstate];
 }
 
-void setup_adc() {
-	// set ADC prescale factor to 32
-	// 8 MHz / 32 = 4 us/250kHz, not inside the desired 50-200 KHz range but sufficient.
-	// One measurement takes 13 cycles = 52us. The Back-EMF settles after 250us (MOTORSETTLETIME).
-	// We need two measurement, one for each motor terminal. Thus, the motor is non-powered for 350us.
-	// We measure every 18ms, this makes a 2% loss of maximum torque.
-	ADCSRA = (1<<ADEN) | (1<<ADPS1) | (1<<ADPS0);
-	// set ADC to bipolar mode for differential conversions
-	// set ADC to left-adjusted
-	// ADCSRB |= (1<<BIN) | (1<<ADLAR);
-	lastadc = micros();
-	adcstate = START;
-	adctime = 0;
-}
-
 void setup_led() {
 	led = 1;
 	DDRA |= 1<<PLED;
 	modbit(PORTA,PLED,led);
+	for (unsigned long time = micros(); micros()-time<500000; ) ;
 	modbit(PORTA,PLED,!led);
+	for (unsigned long time = micros(); micros()-time<500000; ) ;
 	modbit(PORTA,PLED,led);
 	ledtime[0] = LEDTIME[0];
 	ledtime[1] = LEDTIME[1];
 	lastled = micros();
 }
 
+void do_led(unsigned long time) {
+    return;
+	if (time-lastled>ledtime[led]) {
+		led = !led;
+		modbit(PORTA,PLED,led);
+		lastled = time;
+	}
+}
+
+enum {IR_IDLE, IR_GOTMARK, IR_GOTSPACE, IR_STOP, IR_ERR};
+#define IR_BUF 100
+#define IR_MARK 0
+#define IR_SPACE 1<<PIR
+#define IR_GAP 5000
+
+struct Ir {
+	unsigned char state;          // state machine
+	unsigned long time;
+	unsigned int buf[IR_BUF]; // raw data
+	unsigned char len;         // counter of entries in rawbuf
+} ir;
+
+void setup_ir () {
+	ir.state = IR_IDLE;
+	ir.len = 0;
+	ir.time = micros()/50;
+	PCMSK0 = 1<<PIR;
+	PCMSK1 = 0;
+	GIMSK = 1<<PCIE1;
+}
+
+	/*
+	unsigned char data = PORTA & Ir.SPACE;
+	unsigned long time = micros();
+	if (len<IRBUF) {
+		unsigned int delta = (time-lasttime>0xFFFF)? 0xFFFF: time-lasttime;
+		if (len==0 && (data==Ir.SPACE || delta<GAP)) return;
+		if (len>0 && data==Ir.MARK && delta>=GAP) {
+			decodeir();
+			len = 0;
+		}		
+		ir.buf[ir.len++] = delta;
+		lasttime = time;
+	}
+	*/
+
+
+enum {DIST_IDLE, DIST_TRIGGER_START, DIST_TRIGGER_STOP, DIST_TRIGGER_END, DIST_MEASURE_START, DIST_MEASURE_END, DIST_STATES};
+const unsigned long DIST_TIME[] = {100000, 10, 100, 1000, 61000, 0}; // Time for MEASURE_START completion < 16 bit
+const unsigned int DIST_MICROS_PER_CM = 29*2;
+
+struct Dist {
+	unsigned char state;
+	unsigned long time;
+    unsigned long echotime;
+	unsigned int cm;
+} dist;
+ 
+ISR (PCINT_vect) {
+    PORTA |= 1<<PLED;
+	unsigned long time = micros();
+    PORTA &= ~(1<<PLED);
+    switch (dist.state) {
+    case DIST_TRIGGER_END:
+        dist.echotime = time;
+        dist.state++; // DIST_MEASURE_START
+        break;
+    case DIST_MEASURE_START:
+        PORTA |= 1<<PLED;
+        PORTA &= ~(1<<PLED);
+        dist.cm = time-dist.echotime;
+        dist.cm /= DIST_MICROS_PER_CM;
+        dist.state++; // DIST_MEASURE_END
+        break;
+    }
+    PORTA |= 1<<PLED;
+    PORTA &= ~(1<<PLED);
+}
+
+void setup_dist () {
+	dist.cm = 0;
+	dist.state = DIST_MEASURE_END;
+	PCMSK0 = 1<<PDISTECHO;
+	PCMSK1 = 0;
+}
+
+void do_dist (unsigned long time) {
+	if (time-dist.time<DIST_TIME[dist.state]) return;
+	dist.time = time;
+    cli();
+	dist.state = (dist.state+1)%DIST_STATES;
+	switch (dist.state) {
+	case DIST_MEASURE_START: // Measurement failed
+        // Fall thru
+	case DIST_MEASURE_END: // Measurement failed
+		dist.cm = 0;
+        dist.state = DIST_IDLE;
+		// Fall thru
+	case DIST_IDLE: // Disable interrupt, output trigger LOW
+		GIMSK &= ~(1<<PCIE1);
+		DDRA |= 1<<PDISTTRIG;
+		PORTA &= ~(1<<PDISTTRIG);
+		break;
+	case DIST_TRIGGER_START: // Output trigger HIGH
+		PORTA |= 1<<PDISTTRIG;
+		break;
+	case DIST_TRIGGER_STOP: // Output trigger LOW, switch echo to INPUT
+		PORTA &= ~(1<<PDISTTRIG);
+		DDRA &= ~(1<<PDISTECHO);
+        break;
+    case DIST_TRIGGER_END: // Enable interrupt. Only here as device needs some us after TRIGGER_STOP to pull echo line low.
+		GIMSK |= 1<<PCIE1;
+		break;
+	}
+    sei();
+}
+
 void setup_i2c() {
-	USIPP |= 1<<USIPOS; // Switch USI to alternate pins PA0 & PA2
+	// USIPP = 1<<USIPOS; // Switch USI to alternate pins PA0 and PA2. Must also activate __AVR_ATtiny861__ALT__ in usiTwiSlave.c!
 	usiTwiSlaveInit(I2C_SLAVE_ADDR);
 	i2c = false;
 	i2ccount = 0;
 }
 
-void setup() {
-	setup_micros();
-	setup_led();
-	setup_adc();
-	setup_motors();
-	setup_i2c();
-}
-
 #define send(val) usiTwiTransmitByte(val); checksum = _crc_ibutton_update(checksum,val);
 
-// TODO: Use fast digital write.
-
-void loop() {
-	unsigned long time = micros();
+void do_i2c (unsigned long time) {
 	if (usiTwiDataInReceiveBuffer()) {
 		if (usiTwiDataInTransmitBuffer()) {
 			usiTwiReceiveByte();
@@ -284,6 +397,8 @@ void loop() {
 					send(0x00);
 					send(0x00);
 					send(0x00);
+					send(0x00);
+					send(0x00);
 					send(checksum);
 				} else {
 					checksum = 0xFF;
@@ -293,15 +408,18 @@ void loop() {
 					send(adcval[V34]&0xFF);
 					send(adcval[VCC]>>8);
 					send(adcval[VCC]&0xFF);
+					send(dist.cm>>8);
+					send(dist.cm&0xFF);
 					send(checksum);
 					if (i2cdata[0]==0x80) {
 						if (i2cdata[1]>=1 && i2cdata[1]<=15) {
-							TCCR1B = TCCR1B & 0xF0 | i2cdata[1];
+							// TCCR1B = TCCR1B & 0xF0 | i2cdata[1];
+							// TODO: Strange, when this line is activated, LED on PA0 does not work anymore
 						} else if (i2cdata[1]==0) {
 							ledtime[0] = ledtime[1] = LEDTIME[1];
 						} else {
 							ledtime[0] = ledtime[1] = (unsigned long)i2cdata[1]<<3;
-						}						
+						}
 					} else {
 						drive(i2cdata[0],i2cdata[1]);
 					}
@@ -321,22 +439,26 @@ void loop() {
 			ledtime[1] = LEDTIME[1];
 		}
 	}
-	if (time-lastadc>adctime) {
-		adc();
-		lastadc = time;
-	}
 	
-	if (time-lastled>ledtime[led]) {
-		led = !led;
-		modbit(PORTA,PLED,led);
-		lastled = time;
-	}
+}
+
+void setup() {
+	setup_micros();
+	setup_led();
+	setup_adc();
+	setup_motors();
+	setup_dist();
+	setup_i2c();
 }
 
 int main(void) {
 	setup();
 	while (1) {
-		loop();
+		unsigned long time = micros();
+		do_i2c(time);
+		do_adc(time);
+		do_led(time);
+		do_dist(time);
 	}
 }
 
