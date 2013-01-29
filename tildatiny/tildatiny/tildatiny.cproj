@@ -130,6 +130,9 @@
     <None Include="Tildatiny.fzz">
       <SubType>compile</SubType>
     </None>
+    <None Include="Tildatiny.jpg">
+      <SubType>compile</SubType>
+    </None>
     <None Include="Tildatiny.png">
       <SubType>compile</SubType>
     </None>
