@@ -131,6 +131,7 @@ int main (int argc, char* argv[]) {
     int rawdata = 0;
     int nooutput = 0;
     int dobalance = 0;
+    // int frequency = 5;
     int rpower = 0, lpower = 0;
     while (--argc) {
 		argv++;
@@ -140,6 +141,9 @@ int main (int argc, char* argv[]) {
 		else if (0==strcmp(*argv,"-p")) {
 			rpower = lpower = atoi(*++argv);
 			argc--;
+		//} else if (0==strcmp(*argv,"-f")) {
+		//	frequency = atoi(*++argv);
+		//	argc--;
 		} else {
 			fprintf(stderr,"Unknown option %s\n",*argv);
 			return 2;
@@ -209,6 +213,7 @@ int main (int argc, char* argv[]) {
 	float pos = 0.0, pos_ang = 0.0;
 	float posvel = 0.0, posvel_60ms = 0.0, posacc = 0.0, posacc_60ms = 0.0, posjerk = 0.0, posjerk_60ms = 0.0;
 	float pitch = cal_acc_tilt, pitch_vel = 0.0, pitch_acc = 0.0;
+	float target_pos = 0.0, target_vel = 0.0, target_acc = 0.0;
 	int rmotor = s[V12Y], lmotor = s[V34Y];
 	
 	int fd = fileno(stdin);
@@ -217,7 +222,7 @@ int main (int argc, char* argv[]) {
 	char line[80];
 	char* pline = line;
 	
-	unsigned long umpuold = usecs(), udriveold = umpuold;
+	unsigned long ustart = usecs(), umpuold = ustart, udriveold = ustart; 
 	while (1) {
 		
 		int c = fgetc(stdin);
@@ -331,10 +336,10 @@ int main (int argc, char* argv[]) {
 			float posvel_ff = posvel_60ms + posacc_ff*POSACC_FF_TIME;
 			float pos_ff = pos + posvel_ff*POSVEL_FF_TIME;
 			
-			float elev_ang_error = POSJERK_ANG_FACTOR*posjerk_ff+POSACC_ANG_FACTOR*posacc_ff+POSVEL_ANG_FACTOR*posvel_ff;
+			float elev_ang_error = POSJERK_ANG_FACTOR*posjerk_ff+POSACC_ANG_FACTOR*(posacc_ff-target_acc)+POSVEL_ANG_FACTOR*(posvel_ff-target_vel);
 			elev_ang = elev_ang-elev_ang_error*secd/ELEV_CORRECTION_TIME;
 			
-			pos_ang = POS_ANG_FACTOR*pos_ff; // Simple linearisation
+			pos_ang = POS_ANG_FACTOR*(pos_ff-target_pos); // Simple linearisation
 			if (pos_ang<-POS_ANG_MAX) pos_ang = -POS_ANG_MAX; else if (pos_ang>POS_ANG_MAX) pos_ang = POS_ANG_MAX;
 			
 			if (!nooutput) {
@@ -345,14 +350,20 @@ int main (int argc, char* argv[]) {
 							s[V12Y]*MOTOR_VCC_SCALE, s[V34Y]*MOTOR_VCC_SCALE, s[VCC]*MOTOR_VCC_SCALE, s[DIST]);
 				}
 				printf(" rmotor: %+3d lmotor: %+3d", rmotor, lmotor);
-				printf(" posvel[m/s]: %+6.3f posvel_60ms[m/s²]: %+6.3f pos[m]: %+5.3f",
-						posvel, posvel_60ms, pos);
+				printf(" posvel[m/s]: %+6.3f posvel_60ms[m/s²]: %+6.3f pos[m]: %+5.3f target_pos[m]: %+5.3f",
+						posvel, posvel_60ms, pos, target_pos);
 				printf(" posacc[m/s²]: %+6.3f posacc_60ms[m/s²]: %+6.3f posjerk[m/s³]: %+6.3f posjerk_60ms[m/s³]: %+6.3f", 
 						posacc, posacc_60ms, posjerk, posjerk_60ms);
 				printf(" posjerk_ff[m/s³]: %+6.3f posacc_ff[m/s²]: %+6.3f posvel_ff[m/s²]: %+6.3f pos_ff[m]: %+6.3f", 
 						posjerk_ff, posacc_ff, posvel_ff, pos_ff);
 				printf("  elev_ang_error[°]: %+4.2f elev_ang[°]: %+4.1f  pos_ang[°]: %+4.1f",
 						elev_ang_error, elev_ang, pos_ang);
+			}
+			
+			if (usecs(tv)-ustart>60000000) {
+				drive(i2c,128,20,s);
+				ustart = usecs(tv);
+				target_pos += 1.0;
 			}
 		}
 		if (!nooutput) {
