@@ -126,16 +126,5 @@
       <SubType>compile</SubType>
     </Compile>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="Tildatiny.fzz">
-      <SubType>compile</SubType>
-    </None>
-    <None Include="Tildatiny.jpg">
-      <SubType>compile</SubType>
-    </None>
-    <None Include="Tildatiny.png">
-      <SubType>compile</SubType>
-    </None>
-  </ItemGroup>
   <Import Project="$(AVRSTUDIO_EXE_PATH)\\Vs\\Compiler.targets" />
 </Project>

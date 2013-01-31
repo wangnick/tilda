@@ -3,7 +3,15 @@ Microsoft Visual Studio Solution File, Format Version 11.00
 # Atmel Studio Solution File, Format Version 11.00
 Project("{54F91283-7BC4-4236-8FF9-10F437C3AD48}") = "tildatiny", "tildatiny\tildatiny.cproj", "{80EA665C-3A7C-453E-A558-527D901F95F7}"
 EndProject
+Project("{54F91283-7BC4-4236-8FF9-10F437C3AD48}") = "timer16bitissue", "timer16bitissue\timer16bitissue.cproj", "{6C154446-5AEB-481B-83BB-CC587D91643A}"
+EndProject
+Project("{54F91283-7BC4-4236-8FF9-10F437C3AD48}") = "Attiny861-Blink", "blink\Attiny861-Blink.cproj", "{A5DF5016-5441-49ED-98A6-AE9FAE10A7AC}"
+EndProject
 Global
+	GlobalSection(SubversionScc) = preSolution
+		Svn-Managed = True
+		Manager = AnkhSVN - Subversion Support for Visual Studio
+	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|AVR = Debug|AVR
 		Release|AVR = Release|AVR
@@ -13,6 +21,14 @@ Global
 		{80EA665C-3A7C-453E-A558-527D901F95F7}.Debug|AVR.Build.0 = Debug|AVR
 		{80EA665C-3A7C-453E-A558-527D901F95F7}.Release|AVR.ActiveCfg = Release|AVR
 		{80EA665C-3A7C-453E-A558-527D901F95F7}.Release|AVR.Build.0 = Release|AVR
+		{6C154446-5AEB-481B-83BB-CC587D91643A}.Debug|AVR.ActiveCfg = Debug|AVR
+		{6C154446-5AEB-481B-83BB-CC587D91643A}.Debug|AVR.Build.0 = Debug|AVR
+		{6C154446-5AEB-481B-83BB-CC587D91643A}.Release|AVR.ActiveCfg = Release|AVR
+		{6C154446-5AEB-481B-83BB-CC587D91643A}.Release|AVR.Build.0 = Release|AVR
+		{A5DF5016-5441-49ED-98A6-AE9FAE10A7AC}.Debug|AVR.ActiveCfg = Debug|AVR
+		{A5DF5016-5441-49ED-98A6-AE9FAE10A7AC}.Debug|AVR.Build.0 = Debug|AVR
+		{A5DF5016-5441-49ED-98A6-AE9FAE10A7AC}.Release|AVR.ActiveCfg = Release|AVR
+		{A5DF5016-5441-49ED-98A6-AE9FAE10A7AC}.Release|AVR.Build.0 = Release|AVR
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
