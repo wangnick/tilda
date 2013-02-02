@@ -14,9 +14,9 @@
 
 const char VERSION[] = __FILE__ ", " __DATE__" " __TIME__ ", $Id: tilda.cpp,v 1.9 2013/01/31 17:15:08 pi Exp $";
 
-const float MOTOR_RIGHT_TORQUE = 0.060; // Nm = kg m²/s²
-const float MOTOR_LEFT_TORQUE = 0.048; // Nm = kg m²/s²
-const float MOTOR_TORQUE_VCC = 9.0; // V
+const float MOTOR_RIGHT_TORQUE = 0.051; // Nm = kg m²/s²
+const float MOTOR_LEFT_TORQUE = 0.057; // Nm = kg m²/s²
+const float MOTOR_TORQUE_VCC = 10.5; // V
 
 const float MASS = 0.915; // kg
 const float AXIS_DIST = 0.11; // m
@@ -346,8 +346,8 @@ int main (int argc, char* argv[]) {
 				if (rawdata) {
 					printf(" v12y: %3d v34y: %3d vcc: %3d dist: %3d",s[V12Y],s[V34Y],s[VCC],s[DIST]);
 				} else {
-					printf(" v12y[V]: %4.2f v34y[V]: %4.2f vcc[V]: %4.1f dist[cm]: %3d",
-							s[V12Y]*MOTOR_VCC_SCALE, s[V34Y]*MOTOR_VCC_SCALE, s[VCC]*MOTOR_VCC_SCALE, s[DIST]);
+					printf(" v12y[V]: %4.2f v34y[V]: %4.2f vcc[V]: %4.1f dist[cm]: %5.1f",
+							s[V12Y]*MOTOR_VCC_SCALE, s[V34Y]*MOTOR_VCC_SCALE, s[VCC]*MOTOR_VCC_SCALE, s[DIST]*MOTOR_DIST_MM_SCALE/10);
 				}
 				printf(" rmotor: %+3d lmotor: %+3d", rmotor, lmotor);
 				printf(" posvel[m/s]: %+6.3f posvel_60ms[m/s²]: %+6.3f pos[m]: %+5.3f target_pos[m]: %+5.3f",
