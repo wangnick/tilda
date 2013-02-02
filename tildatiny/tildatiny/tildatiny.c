@@ -29,6 +29,8 @@ const int P4A = PB6; // Left motor backwards output - 3A left motor forwards out
 const int PIR = PCINT3; // Infrared receiver, PA3
 const int PDISTTRIG = PA2; // IR distance measurement HC-SR04, trigger, PA2
 const int PDISTECHO = PA3; // IR distance measurement HC-SR04, echo, PA3
+// Note: PDISTECHO must not be equal to PDISTTRIG. 
+// A 3.3V Attiny has not enough power on the output pin to pull the HC-SR04 ECHO line high enough to prepare the trigger.
 const int PLED = PA0; // LED
 
 const unsigned char PWMMAXDUTY = 0x7F;
@@ -144,19 +146,19 @@ void setup_motors () {
 	OCR1C = PWMMAXDUTY;
 	// Set up duty cycle
 	drive(0,0);
-	// Activate timer 1 clock, pre-scaler 1/4 -> 0.5us/2MHz per duty step, 62us/16kHz at 128 duty steps -> Too low torque
-	//TCCR1B = (1<<CS11) | (1<<CS10);
-	// Activate timer 1 clock, pre-scaler 1/8 -> 1us/1MHz per duty step, 125us/8kHz at 128 duty steps -> High pitch, still too low torque
+	// Activate timer 1 clock, pre-scaler 1/4 -> 0.5us/2MHz per duty step, 62us/16kHz at 128 duty steps -> Pitch not audible
+	TCCR1B = (1<<CS11) | (1<<CS10);
+	// Activate timer 1 clock, pre-scaler 1/8 -> 1us/1MHz per duty step, 125us/8kHz at 128 duty steps -> High pitch
 	//TCCR1B = (1<<CS12);
-	// Activate timer 1 clock, pre-scaler 1/16 -> 2us/500kHz per duty step, 250us/4kHz at 128 duty steps -> Reasonable pitch, still too low torque
-	//TCCR1B = (1<<CS12) | (1<<CS10);
-	// Activate timer 1 clock, pre-scaler 1/32 -> 4us/250kHz per duty step, 500us/2kHz at 128 duty steps -> Reasonable pitch and torque
-	TCCR1B = (1<<CS12) | (1<<CS11);
-	// Activate timer 1 clock, pre-scaler 1/64 -> 8us/125kHz per duty step, 1ms/1kHz at 128 duty steps -> Good torque but rather loud
+	// Activate timer 1 clock, pre-scaler 1/16 -> 2us/500kHz per duty step, 250us/4kHz at 128 duty steps -> Medium pitch
+	// TCCR1B = (1<<CS12) | (1<<CS10);
+	// Activate timer 1 clock, pre-scaler 1/32 -> 4us/250kHz per duty step, 500us/2kHz at 128 duty steps -> Unnerving medium pitch
+	//TCCR1B = (1<<CS12) | (1<<CS11);
+	// Activate timer 1 clock, pre-scaler 1/64 -> 8us/125kHz per duty step, 1ms/1kHz at 128 duty steps -> Rather loud
 	//TCCR1B = (1<<CS12) | (1<<CS11) | (1<<CS10);
-	// Activate timer 1 clock, pre-scaler 1/128 -> 16us/62kHz per duty step, 2ms/500Hz at 128 duty steps -> Good torque but rather loud
+	// Activate timer 1 clock, pre-scaler 1/128 -> 16us/62kHz per duty step, 2ms/500Hz at 128 duty steps -> Rather loud
 	//TCCR1B = (1<<CS13);
-	// Activate timer 1 clock, pre-scaler 1/256 -> 32us/31kHz per duty step, 4ms/250Hz at 128 duty steps -> Good torque but nasty snarring sound under load
+	// Activate timer 1 clock, pre-scaler 1/256 -> 32us/31kHz per duty step, 4ms/250Hz at 128 duty steps -> Nasty snarring sound under load
 	//TCCR1B = (1<<CS13) | (1<<CS10);
 }
 
@@ -164,7 +166,7 @@ void setup_adc() {
 	// set ADC prescale factor to 32
 	// 8 MHz / 32 = 4 us/250kHz, not inside the desired 50-200 KHz range but sufficient.
 	// One measurement takes 13 cycles = 52us. The Back-EMF settles after 250us (MOTORSETTLETIME).
-	// We need two measurement, one for each motor terminal. Thus, the motor is non-powered for 350us.
+	// We need two measurement, one for each motor terminal. Thus, each motor is non-powered for 350us.
 	// We measure every 18ms, this makes a 2% loss of maximum torque.
 	ADCSRA = (1<<ADEN) | (1<<ADPS1) | (1<<ADPS0);
 	// set ADC to bipolar mode for differential conversions
@@ -253,7 +255,6 @@ void setup_led() {
 }
 
 void do_led(unsigned long time) {
-    return;
 	if (time-lastled>ledtime[led]) {
 		led = !led;
 		modbit(PORTA,PLED,led);
@@ -307,23 +308,18 @@ struct Dist {
 	unsigned char state;
 	unsigned long time;
     unsigned long echotime;
-	unsigned int cm;
+	unsigned int dist;
 } dist;
  
 ISR (PCINT_vect) {
-    PORTA |= 1<<PLED;
 	unsigned long time = micros();
-    PORTA &= ~(1<<PLED);
     switch (dist.state) {
     case DIST_TRIGGER_END:
         dist.echotime = time;
         dist.state++; // DIST_MEASURE_START
         break;
     case DIST_MEASURE_START:
-        PORTA |= 1<<PLED;
-        PORTA &= ~(1<<PLED);
-        dist.cm = time-dist.echotime;
-        dist.cm /= DIST_MICROS_PER_CM;
+        dist.dist = time-dist.echotime;
         dist.state++; // DIST_MEASURE_END
         break;
     }
@@ -332,7 +328,7 @@ ISR (PCINT_vect) {
 }
 
 void setup_dist () {
-	dist.cm = 0;
+	dist.dist = 0;
 	dist.state = DIST_MEASURE_END;
 	PCMSK0 = 1<<PDISTECHO;
 	PCMSK1 = 0;
@@ -347,23 +343,24 @@ void do_dist (unsigned long time) {
 	case DIST_MEASURE_START: // Measurement failed
         // Fall thru
 	case DIST_MEASURE_END: // Measurement failed
-		dist.cm = 0;
+		dist.dist = 0;
         dist.state = DIST_IDLE;
 		// Fall thru
-	case DIST_IDLE: // Disable interrupt, output trigger LOW
+	case DIST_IDLE: // Disable interrupt
 		GIMSK &= ~(1<<PCIE1);
+		break;
+	case DIST_TRIGGER_START: // Trigger Output HIGH
 		DDRA |= 1<<PDISTTRIG;
-		PORTA &= ~(1<<PDISTTRIG);
+		PORTA |= 1<<PDISTTRIG; // Only needed for first time loop, in fact superfluous as HC-SR04 needs a while to initialize
 		break;
-	case DIST_TRIGGER_START: // Output trigger HIGH
-		PORTA |= 1<<PDISTTRIG;
-		break;
-	case DIST_TRIGGER_STOP: // Output trigger LOW, switch echo to INPUT
+	case DIST_TRIGGER_STOP: // Trigger (Output) LOW
 		PORTA &= ~(1<<PDISTTRIG);
-		DDRA &= ~(1<<PDISTECHO);
         break;
-    case DIST_TRIGGER_END: // Enable interrupt. Only here as device needs some us after TRIGGER_STOP to pull echo line low.
-		GIMSK |= 1<<PCIE1;
+    case DIST_TRIGGER_END: // Device needs some us after TRIGGER_STOP to pull echo line low.
+		PORTA |= 1<<PDISTTRIG; // Trigger (Output) HIGH to avoid short LOW later
+		DDRA &= ~(1<<PDISTTRIG); // Trigger Input (High-Z)
+		DDRA &= ~(1<<PDISTECHO); // Echo Input (High-Z)
+		GIMSK |= 1<<PCIE1; // Enable interrupt
 		break;
 	}
     sei();
@@ -408,13 +405,12 @@ void do_i2c (unsigned long time) {
 					send(adcval[V34]&0xFF);
 					send(adcval[VCC]>>8);
 					send(adcval[VCC]&0xFF);
-					send(dist.cm>>8);
-					send(dist.cm&0xFF);
+					send(dist.dist>>8);
+					send(dist.dist&0xFF);
 					send(checksum);
 					if (i2cdata[0]==0x80) {
 						if (i2cdata[1]>=1 && i2cdata[1]<=15) {
-							// TCCR1B = TCCR1B & 0xF0 | i2cdata[1];
-							// TODO: Strange, when this line is activated, LED on PA0 does not work anymore
+							TCCR1B = TCCR1B & 0xF0 | i2cdata[1];
 						} else if (i2cdata[1]==0) {
 							ledtime[0] = ledtime[1] = LEDTIME[1];
 						} else {
