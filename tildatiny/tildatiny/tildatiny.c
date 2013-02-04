@@ -27,10 +27,11 @@ const int P2A = PB4; // Right motor backwards output - 1A right motor forwards o
 const int P4A = PB6; // Left motor backwards output - 3A left motor forwards output is negated from this in hardware
 
 const int PIR = PCINT3; // Infrared receiver, PA3
-const int PDISTTRIG = PA2; // IR distance measurement HC-SR04, trigger, PA2
-const int PDISTECHO = PA3; // IR distance measurement HC-SR04, echo, PA3
-// Note: PDISTECHO must not be equal to PDISTTRIG. 
-// A 3.3V Attiny has not enough power on the output pin to pull the HC-SR04 ECHO line high enough to prepare the trigger.
+const int PDISTTRIG = PA2; // IR distance measurement HC-SR04, trigger
+const int PDISTECHO = PA2; // IR distance measurement HC-SR04, echo
+// Note: The HC-SR04 Echo line is pulled down with about 36 Ohms.
+// A 3.3V Attiny has not enough power on the output pin to pull the HC-SR04 Echo line high enough to prepare the Trigger, thus PDISTTRIG!=PDISTECHO
+// At 5V Attiny sources 60mA to the Echo line to pull the Trigger to 2.2V, which is sufficient for the HC-SR04.
 const int PLED = PA0; // LED
 
 const unsigned char PWMMAXDUTY = 0x7F;
@@ -71,14 +72,21 @@ ISR (TIMER0_OVF_vect) {
 
 #define TIMER16BIT
 
+static inline unsigned int tcnt0 () __attribute__((always_inline));
+static inline unsigned int tcnt0 () {
+	unsigned int result = TCNT0L;
+#ifdef TIMER16BIT
+	result |= TCNT0H<<8;
+#endif
+	return result; 
+}
+
 unsigned long micros () {
 	unsigned long result;
 	unsigned char sreg_i = SREG & (1<<SREG_I);
 	cli();
-	result = TCNT0L;
+	result = tcnt0();
 #ifdef TIMER16BIT	
-	result |= (unsigned int)TCNT0H<<8; // Without the cast the uint8_t is promoted to signed int,
-										// which will get negative after the shift if TCNT0H>=0x80. Phew.
 	if ((TIFR & (1<<TOV0)) && result<0x8000) result += 0x10000;
 	result += timer0<<16;
 #else
@@ -300,9 +308,9 @@ void setup_ir () {
 	*/
 
 
-enum {DIST_IDLE, DIST_TRIGGER_START, DIST_TRIGGER_STOP, DIST_TRIGGER_END, DIST_MEASURE_START, DIST_MEASURE_END, DIST_STATES};
-const unsigned long DIST_TIME[] = {100000, 10, 100, 1000, 61000, 0}; // Time for MEASURE_START completion < 16 bit
-const unsigned int DIST_MICROS_PER_CM = 29*2;
+enum {DIST_TRIGGER, DIST_MEASURE_START, DIST_MEASURE_END, DIST_IDLE, DIST_STATES};
+const unsigned long DIST_TIME[] = {1000, 40000, 0, 65000}; // Time for MEASURE_START completion < 16 bit. 
+	// Don't trigger more often than every 65ms (bounces from previous trigger might still be on their way back).
 
 struct Dist {
 	unsigned char state;
@@ -314,7 +322,7 @@ struct Dist {
 ISR (PCINT_vect) {
 	unsigned long time = micros();
     switch (dist.state) {
-    case DIST_TRIGGER_END:
+    case DIST_TRIGGER:
         dist.echotime = time;
         dist.state++; // DIST_MEASURE_START
         break;
@@ -323,8 +331,6 @@ ISR (PCINT_vect) {
         dist.state++; // DIST_MEASURE_END
         break;
     }
-    PORTA |= 1<<PLED;
-    PORTA &= ~(1<<PLED);
 }
 
 void setup_dist () {
@@ -332,38 +338,36 @@ void setup_dist () {
 	dist.state = DIST_MEASURE_END;
 	PCMSK0 = 1<<PDISTECHO;
 	PCMSK1 = 0;
+	DDRA &= ~(1<<PDISTECHO); // Echo Input (High-Z)
 }
 
 void do_dist (unsigned long time) {
 	if (time-dist.time<DIST_TIME[dist.state]) return;
-	dist.time = time;
     cli();
 	dist.state = (dist.state+1)%DIST_STATES;
 	switch (dist.state) {
-	case DIST_MEASURE_START: // Measurement failed
+	case DIST_MEASURE_START: // Measurement failed, no echo start in time
         // Fall thru
-	case DIST_MEASURE_END: // Measurement failed
+	case DIST_MEASURE_END: // Measurement failed, no echo end in time
 		dist.dist = 0;
         dist.state = DIST_IDLE;
 		// Fall thru
 	case DIST_IDLE: // Disable interrupt
 		GIMSK &= ~(1<<PCIE1);
 		break;
-	case DIST_TRIGGER_START: // Trigger Output HIGH
-		DDRA |= 1<<PDISTTRIG;
-		PORTA |= 1<<PDISTTRIG; // Only needed for first time loop, in fact superfluous as HC-SR04 needs a while to initialize
-		break;
-	case DIST_TRIGGER_STOP: // Trigger (Output) LOW
-		PORTA &= ~(1<<PDISTTRIG);
-        break;
-    case DIST_TRIGGER_END: // Device needs some us after TRIGGER_STOP to pull echo line low.
-		PORTA |= 1<<PDISTTRIG; // Trigger (Output) HIGH to avoid short LOW later
+	case DIST_TRIGGER: 
+		; unsigned int now = tcnt0();
+		PORTA |= 1<<PDISTTRIG; // Trigger (Input) PULLUP to prepare for Output HIGH, avoiding a short LOW
+		DDRA |= 1<<PDISTTRIG; // Trigger Output (HIGH).
+		while (tcnt0()-now<10) continue; // This is crucial to keep short, as we are sourcing >40mA from the Trigger pin if it is combined with Echo
+		PORTA &= ~(1<<PDISTTRIG); // Trigger (Output) LOW
+		while (tcnt0()-now<18) continue; // Echo needs 4.5 us to go low
 		DDRA &= ~(1<<PDISTTRIG); // Trigger Input (High-Z)
-		DDRA &= ~(1<<PDISTECHO); // Echo Input (High-Z)
 		GIMSK |= 1<<PCIE1; // Enable interrupt
+		dist.time = time;
 		break;
 	}
-    sei();
+	sei();
 }
 
 void setup_i2c() {
