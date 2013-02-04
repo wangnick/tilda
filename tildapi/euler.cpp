@@ -17,7 +17,13 @@ static float invSqrt(float x) {
 	return y;
 }
 
-// IMU algorithm update
+
+// The following two functions are slight adaptations of Madgwick's source code (from, e.g. http://www.x-io.co.uk/). 
+// When I fetched this the website stated: "Open-source resources available on this website are provided under the GNU General Public Licence 
+// unless an alternative licence is provided in source." In the source no alternative license was provided.
+// However, you might nevertheless want to ask him regarding licensing if you also want to use this.
+
+// IMU algorithm update.
 
 void Euler::MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, float az, float deltatime) {
 	float recipNorm;
