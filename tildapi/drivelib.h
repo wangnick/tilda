@@ -1,3 +1,7 @@
+// Tilda - A two-wheel balancing robot using Lego, Attiny, Raspberry Pi
+// Copyright (C) 2013 Sebastian Wangnick
+// See http://s.wangnick.de/doku.php?id=tilda for design details.
+
 #pragma once
 
 const int MOTOR_POWER_RANGE = 127;

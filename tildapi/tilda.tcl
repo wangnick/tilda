@@ -2,6 +2,10 @@
 # the next line restarts using wish \
 exec wish "$0" "$@"
 
+# Tilda - A two-wheel balancing robot using Lego, Attiny, Raspberry Pi
+# See http://s.wangnick.de/doku.php?id=tilda for further details.
+# Copyright (C) 2012 Sebastian Wangnick.
+
 array set struct {acc {x y z} gyro {r p y} mag {x y z} ypr {y p r}}
 
 set logfile "tilda.[clock format [clock seconds] -format %Y%m%d]"

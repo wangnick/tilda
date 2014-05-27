@@ -1,13 +1,12 @@
-// tildatiny.c
+// Tilda - A two-wheel balancing robot using Lego, Attiny, Raspberry Pi
 // (C) 2013 Sebastian Wangnick
-//
-// Attiny861 I2C-controlled PWM generator for two brushed DC motors, in my case Lego 71427.
-// Returns current motor speeds (measured via Back-EMF) and battery power to the I2C master.
-// Motors are driven via H-Bridge, in my case SN754410.
-//
-// Part of the Tilda project, a self-balancing two-wheel Lego robot, with Raspberry Pi as I2C master.
-// Refer to http://code.google.com/p/tilda for further details.
-// 
+// See http://s.wangnick.de/doku.php?id=tilda for design details.
+
+// Tilda is a self-balancing two-wheel Lego robot with Raspberry Pi as I2C master. IMU used is an MPU-6050,
+// plus a HMC5883L magnetometer for absolute direction. Motors are Lego 71427, driven by an SN754410 dual H-bridge,
+// controlled by an Attiny861 I2C slave as PWM generator and for back-EMF and battery voltage measurement. 
+// Power is provided by a reused 2Ah 9.6V NiCd? rechargeable battery pack.
+
 // TODO: Restart motors after sample-and-hold whilst last conversion is is progress.
 // TODO: Try to sample in PWM pause?
 
